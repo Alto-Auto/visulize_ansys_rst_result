@@ -11,4 +11,4 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 - Plots nodal displacements, vm_stress, or custom fields
 
 Here’s what it looks like:
-![Demo](1.png)
+![example](1.png)
