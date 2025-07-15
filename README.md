@@ -14,4 +14,4 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
   
 Here’s what it looks like:
 
-![Deformed mesh plot](examples/2.png)
+![Deformed mesh plot](examples/example.png)
