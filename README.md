@@ -13,7 +13,19 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 - Press `s` to clear all probe markers
 
 ---
+## Results
 
+- Total deformation
+- Von Mises stress
+
+(Feel free to explore your own results: [PyAnsys DPF Example](https://mapdl.docs.pyansys.com/version/stable/examples/gallery_examples/00-mapdl-examples/basic_dpf_example.html))
+<p align="center">
+  <img src="examples/example.png" width="500"/>
+  <br>
+  <em>Figure: Deformed mesh with von Mises stress and probe markers</em>
+</p>
+
+---
 ## Installation
 Clone this repository and install dependencies:
 
@@ -21,3 +33,4 @@ Clone this repository and install dependencies:
 git clone https://github.com/yourusername/visulize_ansys_rst_result.git
 cd visulize_ansys_rst_result
 pip install -r requirements.txt
+
