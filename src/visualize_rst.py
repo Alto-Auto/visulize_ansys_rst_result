@@ -10,7 +10,6 @@ Load and visualize an ANSYS MAPDL .rst file:
 - Interactive probe: press 'a' to toggle, 'c' to clear markers
 """
 
-import os
 # Limit OpenMP threads to avoid crashes
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
