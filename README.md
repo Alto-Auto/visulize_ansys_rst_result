@@ -1,4 +1,4 @@
-# visulize_ansys_rst_result
+# visulize ansys_rst_file, ccx_frd_file
 
 A small Python project to load and visualize results from ANSYS `.rst` files (simulation result files).
 
@@ -7,8 +7,8 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 ---
 
 ## Features
-- Loads ANSYS `.rst` result files
-- Plots nodal displacements, von Mises stress, or custom fields
+- Loads result files
+- Plots nodal displacements, von Mises stress
 - Press `a` to activate interactive probe mode (click on mesh to get values)
 - Press `s` to clear all probe markers
 
