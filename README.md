@@ -9,7 +9,9 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 ## 🚀 Features
 - Loads ANSYS `.rst` result files
 - Plots nodal displacements, vm_stress, or custom fields
-
+- press a to activate probe
+- press c to clear all
+  
 Here’s what it looks like:
 
 ![Deformed mesh plot](examples/2.png)
