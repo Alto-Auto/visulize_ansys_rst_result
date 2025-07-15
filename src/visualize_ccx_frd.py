@@ -132,7 +132,7 @@ def plot_deformed_contour(grid, displacement, scalar_field, scalar_name, scale=1
 
 # ------------------- MAIN -------------------
 def main():
-    frd_path = r"C:\Users\altoa\AppData\Local\Temp\fcfem_glotntc0\FEMMeshGmsh.frd"
+    frd_path = "your_frd_file"
     vtu_path = convert_frd_to_vtu(frd_path)
     print(f"[INFO] Converted file: {vtu_path}")
 
