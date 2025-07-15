@@ -8,15 +8,16 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 
 ## Features
 - Loads ANSYS `.rst` result files
-- Plots nodal displacements, vm_stress, or custom fields
-- press a to activate probe
-- press c to clear all
+- Plots nodal displacements, von Mises stress, or custom fields
+- Press `a` to activate interactive probe mode (click on mesh to get values)
+- Press `s` to clear all probe markers
 
+---
 
-## Results 
- - Total deformation
- - Von mises stress\n
-(feel free to visulize your own result: "https://mapdl.docs.pyansys.com/version/stable/examples/gallery_examples/00-mapdl-examples/basic_dpf_example.html")
-Here’s what it looks like:
+## Installation
+Clone this repository and install dependencies:
 
-![Deformed mesh plot](examples/example.png)
+```bash
+git clone https://github.com/yourusername/visulize_ansys_rst_result.git
+cd visulize_ansys_rst_result
+pip install -r requirements.txt
