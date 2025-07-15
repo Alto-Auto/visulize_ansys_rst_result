@@ -13,10 +13,10 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 - press c to clear all
 
 
-## Results (feel free to visulize your own result: "https://mapdl.docs.pyansys.com/version/stable/examples/gallery_examples/00-mapdl-examples/basic_dpf_example.html")
+## Results 
  - Total deformation
- - Von mises stress
-
+ - Von mises stress\n
+(feel free to visulize your own result: "https://mapdl.docs.pyansys.com/version/stable/examples/gallery_examples/00-mapdl-examples/basic_dpf_example.html")
 Here’s what it looks like:
 
 ![Deformed mesh plot](examples/example.png)
