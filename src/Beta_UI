@@ -1,0 +1,342 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import os
+import numpy as np
+from PyQt5 import QtWidgets, QtCore
+from pyvistaqt import QtInteractor
+import pyvista as pv
+from ansys.mapdl import reader
+import sys
+
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+class AnsysViewer(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ANSYS RST Viewer - Engineering UI")
+        self.resize(1500, 800)
+
+        # === Top-level layout ===
+        main_widget = QtWidgets.QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QtWidgets.QVBoxLayout()
+        main_widget.setLayout(main_layout)
+
+        # === Top toolbar ===
+        toolbar = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(toolbar)
+
+        load_btn = QtWidgets.QPushButton("Load .rst")
+        load_btn.clicked.connect(self.load_rst_file)
+        toolbar.addWidget(load_btn)
+
+        self.probe_btn = QtWidgets.QPushButton("Probe Tool")
+        self.probe_btn.clicked.connect(self.start_probe)
+        toolbar.addWidget(self.probe_btn)
+
+        toolbar.addWidget(QtWidgets.QLabel("Colormap:"))
+        self.cmap_box = QtWidgets.QComboBox()
+        self.cmap_box.addItems(["jet", "viridis", "plasma", "coolwarm", "gray"])
+        self.cmap_box.currentTextChanged.connect(self.plot_result)
+        toolbar.addWidget(self.cmap_box)
+
+        self.log_check = QtWidgets.QCheckBox("Log scale")
+        self.log_check.stateChanged.connect(self.plot_result)
+        toolbar.addWidget(self.log_check)
+
+        # --- Underlay control ---
+        toolbar.addWidget(QtWidgets.QLabel("Underlay:"))
+        self.underlay_box = QtWidgets.QComboBox()
+        self.underlay_box.addItems(["None", "Wireframe", "Edges","Surface"])
+        self.underlay_box.currentTextChanged.connect(self.plot_result)
+        toolbar.addWidget(self.underlay_box)
+
+        # --- Contour edges toggle ---
+        self.edges_check = QtWidgets.QCheckBox("Show contour edges")
+        self.edges_check.setChecked(True)
+        self.edges_check.stateChanged.connect(self.plot_result)
+        toolbar.addWidget(self.edges_check)
+
+        self.axes_check = QtWidgets.QCheckBox("Show XYZ axes")
+        self.axes_check.setChecked(True)
+        self.axes_check.stateChanged.connect(self.toggle_axes)
+        toolbar.addWidget(self.axes_check)
+
+        reset_btn = QtWidgets.QPushButton("Reset View")
+        reset_btn.clicked.connect(self.reset_camera)
+        toolbar.addWidget(reset_btn)
+
+        toolbar.addStretch(1)
+
+        # === Min / Max label ===
+        self.min_max_label = QtWidgets.QLabel("Min: -- | Max: --")
+        main_layout.addWidget(self.min_max_label)
+
+        # === Split tree + plot ===
+        h_layout = QtWidgets.QHBoxLayout()
+        main_layout.addLayout(h_layout)
+
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setHeaderLabel("Results")
+        h_layout.addWidget(self.tree, 1)
+
+        right_panel = QtWidgets.QVBoxLayout()
+        h_layout.addLayout(right_panel, 4)
+
+        self.plotter = QtInteractor(self)
+        right_panel.addWidget(self.plotter.interactor)
+
+        # === Animation controls ===
+        form_layout = QtWidgets.QFormLayout()
+        self.scale_input = QtWidgets.QLineEdit("2.0")
+        self.frames_input = QtWidgets.QLineEdit("60")
+        form_layout.addRow("Deformation scale:", self.scale_input)
+        form_layout.addRow("Animation frames:", self.frames_input)
+        right_panel.addLayout(form_layout)
+
+        self.play_btn = QtWidgets.QPushButton("Play Animation")
+        self.play_btn.clicked.connect(self.animate)
+        right_panel.addWidget(self.play_btn)
+
+        self.step_label = QtWidgets.QLabel("Step: 0 / 0")
+        right_panel.addWidget(self.step_label)
+
+        # === Data state ===
+        self.grid = None
+        self.deformed = None
+        self.disp = None
+        self.fields = {}
+        self.current_field_name = "Total Deformation"
+        self.current_field = None
+        self.probes = []
+
+        self.plotter.add_axes()
+        self.plotter.view_isometric()
+        self.tree.itemClicked.connect(self.on_tree_click)
+
+    def toggle_axes(self):
+        if self.axes_check.isChecked():
+            self.plotter.add_axes()
+        else:
+            self.plotter.remove_bounds_axes()
+
+    def reset_camera(self):
+        self.plotter.view_isometric()
+        self.plotter.reset_camera()
+
+    def build_result_tree(self):
+        self.tree.clear()
+        deformation = QtWidgets.QTreeWidgetItem(self.tree, ["Deformation"])
+        for name in ["Total Deformation", "Ux", "Uy", "Uz"]:
+            QtWidgets.QTreeWidgetItem(deformation, [name])
+
+        stress = QtWidgets.QTreeWidgetItem(self.tree, ["Stress"])
+        for name in ["Von Mises", "Principal Stress S1", "Sx", "Sy", "Sz", "Txy", "Tyz", "Tzx"]:
+            QtWidgets.QTreeWidgetItem(stress, [name])
+
+        strain = QtWidgets.QTreeWidgetItem(self.tree, ["Strain"])
+        for name in ["Principal Elastic Strain", "Ex", "Ey", "Ez"]:
+            QtWidgets.QTreeWidgetItem(strain, [name])
+
+        if "Temperature" in self.fields:
+            temp = QtWidgets.QTreeWidgetItem(self.tree, ["Temperature"])
+            QtWidgets.QTreeWidgetItem(temp, ["Temperature"])
+
+        self.tree.expandAll()
+
+    def load_rst_file(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Open ANSYS RST File", "", "*.rst")
+        if not path:
+            return
+        print(f"[INFO] Loading: {path}")
+        result = reader.read_binary(path)
+        self.grid = result.grid
+        self.deformed = self.grid.copy()
+
+        self.disp, disp_mag = self.extract_displacement(result)
+        stress_fields = self.extract_stress(result)
+        strain_fields = self.extract_strain(result)
+        vm = self.compute_von_mises(stress_fields)
+        s1 = self.compute_principal_stress_s1(stress_fields)
+
+        fields = {
+            "Total Deformation": disp_mag,
+            "Ux": self.disp[:,0], "Uy": self.disp[:,1], "Uz": self.disp[:,2],
+            "Von Mises": vm, "Principal Stress S1": s1,
+            "Sx": stress_fields[:,0], "Sy": stress_fields[:,1], "Sz": stress_fields[:,2],
+            "Txy": stress_fields[:,3], "Tyz": stress_fields[:,4], "Tzx": stress_fields[:,5],
+            "Principal Elastic Strain": strain_fields[:,0],
+            "Ex": strain_fields[:,0], "Ey": strain_fields[:,1], "Ez": strain_fields[:,2]
+        }
+
+        temp = self.extract_temperature(result)
+        if temp is not None:
+            fields["Temperature"] = temp
+
+        self.fields = {k: v for k, v in fields.items() if v is not None}
+        self.build_result_tree()
+        self.set_field("Total Deformation")
+
+    def extract_displacement(self, result, rnum=0):
+        nnum, disp = result.nodal_displacement(rnum)
+        return disp, np.linalg.norm(disp, axis=1)
+
+    def extract_stress(self, result, rnum=0):
+        try:
+            nnum, stress = result.nodal_stress(rnum)
+            return np.nan_to_num(stress)
+        except:
+            return np.zeros((self.grid.n_points, 6))
+
+    def extract_strain(self, result, rnum=0):
+        try:
+            nnum, strain = result.nodal_elastic_strain(rnum)
+            return np.nan_to_num(strain)
+        except:
+            return np.zeros((self.grid.n_points, 6))
+
+    def extract_temperature(self, result, rnum=0):
+        try:
+            nnum, temp = result.nodal_temperature(rnum)
+            return temp
+        except:
+            return None
+
+    def compute_von_mises(self, stress):
+        sx, sy, sz, txy, tyz, tzx = stress[:,0], stress[:,1], stress[:,2], stress[:,3], stress[:,4], stress[:,5]
+        return np.sqrt(0.5*((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2) + 3*(txy**2 + tyz**2 + tzx**2))
+
+    def compute_principal_stress_s1(self, stress):
+        return (stress[:,0] + stress[:,1] + stress[:,2]) / 3
+
+    def on_tree_click(self, item, col):
+        field_name = item.text(0)
+        if field_name in self.fields:
+            self.set_field(field_name)
+
+    def set_field(self, field):
+        self.current_field_name = field
+        self.current_field = self.fields[field]
+        self.plot_result()
+
+    def plot_result(self):
+        if self.deformed is None:
+            return
+        scale = float(self.scale_input.text())
+        warped_points = self.grid.points + scale * self.disp
+        data = self.current_field * scale
+        if self.log_check.isChecked():
+            data = np.log10(np.clip(data, 1e-6, None))
+
+        self.deformed.points = warped_points
+        self.deformed.point_data[self.current_field_name] = data
+        vmin, vmax = np.min(data), np.max(data)
+        self.min_max_label.setText(f"Min: {vmin:.3f} | Max: {vmax:.3f}")
+
+        underlay_mode = self.underlay_box.currentText()
+        show_contour_edges = self.edges_check.isChecked()
+
+        self.plotter.clear()
+        if underlay_mode == "Wireframe":
+            self.plotter.add_mesh(self.grid, style="wireframe", opacity=0.3, color="grey", show_edges=False)
+        elif underlay_mode == "Edges":
+            edges = self.grid.extract_feature_edges()
+            self.plotter.add_mesh(edges, color="black", line_width=1.5)
+        elif underlay_mode =="Surface":
+            self.plotter.add_mesh(self.grid, style="surface", opacity=0.3, color="grey", show_edges=False)
+
+        self.plotter.add_mesh(self.deformed, scalars=self.current_field_name,
+                              cmap=self.cmap_box.currentText(), clim=[vmin, vmax],
+                              show_edges=show_contour_edges)
+        if self.axes_check.isChecked():
+            self.plotter.add_axes()
+        self.plotter.update()
+
+    def animate(self):
+        if self.deformed is None:
+            return
+        scale_target = float(self.scale_input.text())
+        steps = int(self.frames_input.text())
+        cmap = self.cmap_box.currentText()
+        log_mode = self.log_check.isChecked()
+        underlay_mode = self.underlay_box.currentText()
+        show_contour_edges = self.edges_check.isChecked()
+        cam_pos = self.plotter.camera_position
+
+        raw_max_data = self.current_field * scale_target
+        if log_mode:
+            raw_max_data = np.log10(np.clip(raw_max_data, 1e-6, None))
+        vmin, vmax = np.min(raw_max_data), np.max(raw_max_data)
+
+        self.plotter.clear()
+        if underlay_mode == "Wireframe":
+            self.plotter.add_mesh(self.grid, style="wireframe", opacity=0.3, color="grey", show_edges=True)
+        elif underlay_mode == "Edges":
+            edges = self.grid.extract_feature_edges()
+            self.plotter.add_mesh(edges, color="black", line_width=1.5)
+        elif underlay_mode == "Surface":
+            self.plotter.add_mesh(self.grid, style="surface", opacity=0.3, color="grey", show_edges=False)
+
+        data = self.current_field.copy()
+        if log_mode:
+            data = np.log10(np.clip(data, 1e-6, None))
+
+        self.deformed.points = self.grid.points.copy()
+        self.deformed.point_data[self.current_field_name] = data
+        actor = self.plotter.add_mesh(self.deformed, scalars=self.current_field_name,
+                                      cmap=cmap, clim=[vmin, vmax],
+                                      show_edges=show_contour_edges)
+        self.plotter.camera_position = cam_pos
+
+        for i, s in enumerate(np.linspace(0, scale_target, steps)):
+            warped_points = self.grid.points + s * self.disp
+            new_data = self.current_field * s
+            if log_mode:
+                new_data = np.log10(np.clip(new_data, 1e-6, None))
+
+            self.deformed.points = warped_points
+            self.deformed.point_data[self.current_field_name] = new_data
+            actor.mapper.scalar_range = (vmin, vmax)
+
+            self.plotter.update()
+            self.step_label.setText(f"Step: {i+1} / {steps}")
+            QtWidgets.QApplication.processEvents()
+
+        print("[INFO] Animation complete.")
+
+    def start_probe(self):
+        if self.deformed is None:
+            return
+        self.plotter.enable_point_picking(callback=self.probe_callback, show_message=True, use_picker=True)
+
+    def probe_callback(self, point, picker):
+        idx = self.deformed.find_closest_point(point)
+        value = self.current_field[idx]
+
+        # Get actual deformed node location
+        deformed_point = self.deformed.points[idx]
+
+        # Plot on deformed mesh location without resetting camera
+        sphere = pv.Sphere(radius=0.2, center=deformed_point)
+        self.plotter.add_mesh(sphere, color="black", reset_camera=False)
+        self.plotter.add_point_labels(
+            [deformed_point],
+            [f"{self.current_field_name}: {value:.3f}"],
+            font_size=10,
+            text_color="black",
+            reset_camera=False,
+            point_size = 8,
+         shape_opacity = 0.5,
+        always_visible = True)
+
+        self.plotter.update()
+
+
+if __name__ == "__main__":
+    app = QtWidgets.QApplication(sys.argv)
+    viewer = AnsysViewer()
+    viewer.show()
+    sys.exit(app.exec_())
