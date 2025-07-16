@@ -22,7 +22,7 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 <p align="center">
   <img src="examples/example.png" width="500"/>
   <br>
-  <em>Figure: Deformed mesh with von Mises stress and probe markers</em>
+  <em>Figure: Deformed mesh </em>
 </p>
 
 ---
