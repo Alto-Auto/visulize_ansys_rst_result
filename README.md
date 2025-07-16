@@ -10,7 +10,7 @@ This tool uses [PyVista](https://github.com/pyvista/pyvista) and [ansys-mapdl-re
 - Loads result files
 - Plots nodal displacements, von Mises stress
 - Press `a` to activate interactive probe mode (click on mesh to get values)
-- Press `s` to clear all probe markers
+- Press `c` to clear all probe markers
 
 ---
 ## Results
