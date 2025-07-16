@@ -72,8 +72,24 @@ class AnsysViewer(QtWidgets.QMainWindow):
         toolbar.addStretch(1)
 
         # === Min / Max label ===
+        self.min_max_box = QtWidgets.QGroupBox("Min / Max Info")
+        self.min_max_box.setCheckable(True)
+        self.min_max_box.setChecked(True)
+        self.min_max_box.setStyleSheet("QGroupBox { font-size: 10pt; }")
+
+        min_layout = QtWidgets.QVBoxLayout()
+        min_layout.setContentsMargins(4, 2, 4, 2)
+        min_layout.setSpacing(2)
+
         self.min_max_label = QtWidgets.QLabel("Min: -- | Max: --")
-        main_layout.addWidget(self.min_max_label)
+        self.min_max_label.setStyleSheet("font-size: 9pt;")
+        min_layout.addWidget(self.min_max_label)
+
+        self.min_max_box.setLayout(min_layout)
+        self.min_max_box.setMaximumHeight(50)
+        self.min_max_box.toggled.connect(self.min_max_label.setVisible)
+
+        main_layout.addWidget(self.min_max_box)
 
         # === Split tree + plot ===
         h_layout = QtWidgets.QHBoxLayout()
@@ -227,7 +243,7 @@ class AnsysViewer(QtWidgets.QMainWindow):
             return
         scale = float(self.scale_input.text())
         warped_points = self.grid.points + scale * self.disp
-        data = self.current_field * scale
+        data = self.current_field  # no scale multiplication
         if self.log_check.isChecked():
             data = np.log10(np.clip(data, 1e-6, None))
 
@@ -245,7 +261,7 @@ class AnsysViewer(QtWidgets.QMainWindow):
         elif underlay_mode == "Edges":
             edges = self.grid.extract_feature_edges()
             self.plotter.add_mesh(edges, color="black", line_width=1.5)
-        elif underlay_mode =="Surface":
+        elif underlay_mode == "Surface":
             self.plotter.add_mesh(self.grid, style="surface", opacity=0.3, color="grey", show_edges=False)
 
         self.plotter.add_mesh(self.deformed, scalars=self.current_field_name,
@@ -255,9 +271,30 @@ class AnsysViewer(QtWidgets.QMainWindow):
             self.plotter.add_axes()
         self.plotter.update()
 
+    def mark_min_max_points(self, data, vmin, vmax):
+        min_idx = np.argmin(data)
+        max_idx = np.argmax(data)
+        min_pt = self.deformed.points[min_idx]
+        max_pt = self.deformed.points[max_idx]
+
+        # min
+        self.plotter.add_point_labels(
+            [min_pt], [f"Min: {vmin:.3f}"],
+            text_color="blue", point_color="blue",
+            point_size=12, always_visible=True, reset_camera=False
+        )
+        # max
+        self.plotter.add_point_labels(
+            [max_pt], [f"Max: {vmax:.3f}"],
+            text_color="red", point_color="red",
+            point_size=12, always_visible=True, reset_camera=False
+        )
+
+#the scale bar change with the deformation scale
     def animate(self):
         if self.deformed is None:
             return
+
         scale_target = float(self.scale_input.text())
         steps = int(self.frames_input.text())
         cmap = self.cmap_box.currentText()
@@ -266,11 +303,17 @@ class AnsysViewer(QtWidgets.QMainWindow):
         show_contour_edges = self.edges_check.isChecked()
         cam_pos = self.plotter.camera_position
 
-        raw_max_data = self.current_field * scale_target
+        # === Compute global scalar range from original data
+        global_field = self.current_field * scale_target
         if log_mode:
-            raw_max_data = np.log10(np.clip(raw_max_data, 1e-6, None))
-        vmin, vmax = np.min(raw_max_data), np.max(raw_max_data)
+            global_field = np.log10(np.clip(global_field, 1e-6, None))
+        vmin, vmax = np.min(global_field), np.max(global_field)
 
+        static_field = self.current_field
+        if log_mode:
+            static_field = np.log10(np.clip(static_field, 1e-6, None))
+        vmin2, vmax2 = np.min(static_field), np.max(static_field)
+        # === Clear plotter and draw underlay once
         self.plotter.clear()
         if underlay_mode == "Wireframe":
             self.plotter.add_mesh(self.grid, style="wireframe", opacity=0.3, color="grey", show_edges=True)
@@ -280,29 +323,35 @@ class AnsysViewer(QtWidgets.QMainWindow):
         elif underlay_mode == "Surface":
             self.plotter.add_mesh(self.grid, style="surface", opacity=0.3, color="grey", show_edges=False)
 
-        data = self.current_field.copy()
-        if log_mode:
-            data = np.log10(np.clip(data, 1e-6, None))
-
+        # === Draw initial deformed shape with stable scalar range
         self.deformed.points = self.grid.points.copy()
-        self.deformed.point_data[self.current_field_name] = data
-        actor = self.plotter.add_mesh(self.deformed, scalars=self.current_field_name,
-                                      cmap=cmap, clim=[vmin, vmax],
-                                      show_edges=show_contour_edges)
+        self.deformed.point_data[self.current_field_name] = static_field
+
+        actor = self.plotter.add_mesh(
+            self.deformed, scalars=self.current_field_name,
+            cmap=cmap, clim=[vmin2, vmax2],
+            show_edges=show_contour_edges,
+            show_scalar_bar=False
+        )
+
         self.plotter.camera_position = cam_pos
 
+        # === Animate with changing color values under stable color scale
         for i, s in enumerate(np.linspace(0, scale_target, steps)):
             warped_points = self.grid.points + s * self.disp
-            new_data = self.current_field * s
+            color_data = self.current_field * s
             if log_mode:
-                new_data = np.log10(np.clip(new_data, 1e-6, None))
+                color_data = np.log10(np.clip(color_data, 1e-6, None))
 
             self.deformed.points = warped_points
-            self.deformed.point_data[self.current_field_name] = new_data
-            actor.mapper.scalar_range = (vmin, vmax)
+            self.deformed.point_data[self.current_field_name] = color_data
 
+            # Enforce stable color range
+            actor.mapper.scalar_range = (vmin2, vmax2)
+            actor.mapper.update()
             self.plotter.update()
-            self.step_label.setText(f"Step: {i+1} / {steps}")
+
+            self.step_label.setText(f"Step: {i + 1} / {steps}")
             QtWidgets.QApplication.processEvents()
 
         print("[INFO] Animation complete.")
