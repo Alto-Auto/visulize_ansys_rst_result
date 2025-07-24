@@ -8,6 +8,7 @@ Load and visualize an ANSYS MAPDL .rst file:
 - Plots deformed shape colored by displacement magnitude
 - Plots von Mises stress
 - Interactive probe: press 'a' to toggle, 'c' to clear markers
+- style: wirefram, edge, surface
 """
 
 # Limit OpenMP threads to avoid crashes
@@ -47,19 +48,54 @@ def extract_displacement(result, load_step=0):
     magnitude = np.linalg.norm(displacement, axis=1)
     max_node = nnum[np.argmax(magnitude)]
     print(f"[INFO] Max displacement: {magnitude.max():.6f} at node {max_node}")
-    return displacement, magnitude
+    return nnum, displacement, magnitude
 
 
 def extract_von_mises_stress(result, load_step=0):
     nnum, stress = result.nodal_stress(load_step)
     stress = np.nan_to_num(stress)
-    sx, sy, sz, txy, tyz, tzx = stress[:,0], stress[:,1], stress[:,2], stress[:,3], stress[:,4], stress[:,5]
-    von_mises = np.sqrt(0.5 * ((sx - sy)**2 + (sy - sz)**2 + (sz - sx)**2) + 3*(txy**2 + tyz**2 + tzx**2))
+    sx, sy, sz, txy, tyz, tzx = stress[:, 0], stress[:, 1], stress[:, 2], stress[:, 3], stress[:, 4], stress[:, 5]
+    von_mises = np.sqrt(0.5 * ((sx - sy) ** 2 + (sy - sz) ** 2 + (sz - sx) ** 2) + 3 * (txy ** 2 + tyz ** 2 + tzx ** 2))
     max_node = nnum[np.argmax(von_mises)]
     print(f"[INFO] Max von Mises stress: {von_mises.max():.6f} at node {max_node}")
-    return von_mises
+    return nnum, von_mises
+
+def map_displacement_to_grid(grid, nnum, displacement):
+    disp_full = np.zeros((grid.n_points, 3))
+    if "ansys_node_num" not in grid.point_data:
+        raise RuntimeError("Grid missing 'ansys_node_num'. Cannot map results.")
+    mapdl_nnum = grid.point_data["ansys_node_num"]
+    nnum_to_idx = {num: idx for idx, num in enumerate(mapdl_nnum)}
+    skipped = 0
+
+    for i, node in enumerate(nnum):
+        if node in nnum_to_idx:
+            disp_full[nnum_to_idx[node]] = displacement[i]
+        else:
+            skipped += 1
+
+    if skipped:
+        print(f"[WARN] Skipped {skipped} nodes not in grid (likely remote points).")
+    return disp_full
 
 
+def map_scalar_to_grid(grid, nnum, scalar):
+    full = np.zeros(grid.n_points)
+    if "ansys_node_num" not in grid.point_data:
+        raise RuntimeError("Grid missing 'ansys_node_num'. Cannot map results.")
+    mapdl_nnum = grid.point_data["ansys_node_num"]
+    nnum_to_idx = {num: idx for idx, num in enumerate(mapdl_nnum)}
+    skipped = 0
+
+    for i, node in enumerate(nnum):
+        if node in nnum_to_idx:
+            full[nnum_to_idx[node]] = scalar[i]
+        else:
+            skipped += 1
+
+    if skipped:
+        print(f"[WARN] Skipped {skipped} nodes not in grid (likely remote points).")
+    return full
 # ------------------- PLOTTING -------------------
 def plot_deformed_contour(grid, displacement, scalar_field, scalar_name, scale=SCALE, style="surface", show_undeformed=True):
     if displacement.shape[0] == 3:
@@ -142,10 +178,14 @@ def main():
     result = reader.read_binary(RST_PATH)
     grid = result.grid
 
-    displacement, disp_mag = extract_displacement(result)
+    nnum_disp, displacement_raw, disp_mag_raw = extract_displacement(result)
+    displacement = map_displacement_to_grid(grid, nnum_disp, displacement_raw)
+    disp_mag = np.linalg.norm(displacement, axis=1)
     plot_deformed_contour(grid, displacement, disp_mag, "Displacement", style="surface")
 
-    von_mises = extract_von_mises_stress(result)
+    # von Mises plot
+    nnum_vm, von_mises_raw = extract_von_mises_stress(result)
+    von_mises = map_scalar_to_grid(grid, nnum_vm, von_mises_raw)
     plot_deformed_contour(grid, displacement, von_mises, "von Mises", style="surface")
 
 
