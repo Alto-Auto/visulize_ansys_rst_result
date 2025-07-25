@@ -8,7 +8,6 @@ Load and visualize an ANSYS MAPDL .rst file:
 - Plots deformed shape colored by displacement magnitude
 - Plots von Mises stress
 - Interactive probe: press 'a' to toggle, 'c' to clear markers
-- style: wirefram, edge, surface
 """
 
 # Limit OpenMP threads to avoid crashes
@@ -25,9 +24,8 @@ from ansys.dpf import core as dpf
 
 
 # ------------------- CONFIG -------------------
-RST_PATH = "your_rst_file"
-SCALE = 1  # deformation scaling
-
+RST_PATH = r"D:\AltoAuto FEA Automation\AltoAuto FEA Automation - python template\AltoAuto_Main\Tools\gmsh workflow\cad_topology\mesh_runs\file - Copie.rst"
+SCALE = 0.01 # deformation scaling
 
 # ------------------- CORE FUNCTIONS -------------------
 def extract_stiffness_energy_from_rst(rst_path):
@@ -60,42 +58,14 @@ def extract_von_mises_stress(result, load_step=0):
     print(f"[INFO] Max von Mises stress: {von_mises.max():.6f} at node {max_node}")
     return nnum, von_mises
 
-def map_displacement_to_grid(grid, nnum, displacement):
-    disp_full = np.zeros((grid.n_points, 3))
-    if "ansys_node_num" not in grid.point_data:
-        raise RuntimeError("Grid missing 'ansys_node_num'. Cannot map results.")
-    mapdl_nnum = grid.point_data["ansys_node_num"]
-    nnum_to_idx = {num: idx for idx, num in enumerate(mapdl_nnum)}
-    skipped = 0
-
+def map_to_grid(grid, nnum, values, is_vector=False):
+    out = np.zeros((grid.n_points, 3 if is_vector else 1))
+    nmap = {num: i for i, num in enumerate(grid.point_data["ansys_node_num"])}
     for i, node in enumerate(nnum):
-        if node in nnum_to_idx:
-            disp_full[nnum_to_idx[node]] = displacement[i]
-        else:
-            skipped += 1
+        if node in nmap:
+            out[nmap[node]] = values[i]
+    return out if is_vector else out.flatten()
 
-    if skipped:
-        print(f"[WARN] Skipped {skipped} nodes not in grid (likely remote points).")
-    return disp_full
-
-
-def map_scalar_to_grid(grid, nnum, scalar):
-    full = np.zeros(grid.n_points)
-    if "ansys_node_num" not in grid.point_data:
-        raise RuntimeError("Grid missing 'ansys_node_num'. Cannot map results.")
-    mapdl_nnum = grid.point_data["ansys_node_num"]
-    nnum_to_idx = {num: idx for idx, num in enumerate(mapdl_nnum)}
-    skipped = 0
-
-    for i, node in enumerate(nnum):
-        if node in nnum_to_idx:
-            full[nnum_to_idx[node]] = scalar[i]
-        else:
-            skipped += 1
-
-    if skipped:
-        print(f"[WARN] Skipped {skipped} nodes not in grid (likely remote points).")
-    return full
 # ------------------- PLOTTING -------------------
 def plot_deformed_contour(grid, displacement, scalar_field, scalar_name, scale=SCALE, style="surface", show_undeformed=True):
     if displacement.shape[0] == 3:
@@ -113,7 +83,7 @@ def plot_deformed_contour(grid, displacement, scalar_field, scalar_name, scale=S
     print(f"[INFO] {scalar_name}: Max={max_val:.4f} at {max_point}, Min={min_val:.4f} at {min_point}")
 
     vmin, vmax = np.percentile(scalar_field, 0), np.percentile(scalar_field, 100)
-    cmap = ListedColormap(['blue', 'royalblue', 'cyan', '#00FA9A', '#7CFC00', 
+    cmap = ListedColormap(['blue', 'royalblue', 'cyan', '#00FA9A', '#7CFC00',
                            '#ADFF2F', 'yellow', 'orange', 'red']).with_extremes()
 
     plotter = pv.Plotter()
@@ -177,16 +147,29 @@ def main():
     print("[INFO] Loading ANSYS .rst result file...")
     result = reader.read_binary(RST_PATH)
     grid = result.grid
+    total_steps = result.nsets
+    while True:
+        try:
+            step = int(input(f"\nEnter load step index (0 to {total_steps - 1}, or -1 to quit): "))
+            if step == -1:
+                break
+            if not (0 <= step < total_steps):
+                print("[ERROR] Invalid step number.")
+                continue
 
-    nnum_disp, displacement_raw, disp_mag_raw = extract_displacement(result)
-    displacement = map_displacement_to_grid(grid, nnum_disp, displacement_raw)
-    disp_mag = np.linalg.norm(displacement, axis=1)
-    plot_deformed_contour(grid, displacement, disp_mag, "Displacement", style="surface")
+            # Displacement plot
+            nnum_disp, displacement_raw, disp_mag_raw = extract_displacement(result, step)
+            displacement = map_to_grid(grid, nnum_disp, displacement_raw, is_vector=True)
+            disp_mag = np.linalg.norm(displacement, axis=1)
+            plot_deformed_contour(grid, displacement, disp_mag, "Displacement", style="wireframe")
 
-    # von Mises plot
-    nnum_vm, von_mises_raw = extract_von_mises_stress(result)
-    von_mises = map_scalar_to_grid(grid, nnum_vm, von_mises_raw)
-    plot_deformed_contour(grid, displacement, von_mises, "von Mises", style="surface")
+            # von Mises plot
+            nnum_vm, von_mises_raw = extract_von_mises_stress(result, step)
+            von_mises = map_to_grid(grid, nnum_vm, von_mises_raw)
+            plot_deformed_contour(grid, displacement, von_mises, "von Mises", style="surface")
+
+        except Exception as e:
+            print(f"[ERROR] {e}")
 
 
 if __name__ == "__main__":
