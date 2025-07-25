@@ -8,6 +8,7 @@ Load and visualize an ANSYS MAPDL .rst file:
 - Plots deformed shape colored by displacement magnitude
 - Plots von Mises stress
 - Interactive probe: press 'a' to toggle, 'c' to clear markers
+- style: "surface", "wireframe", "edge"
 """
 
 # Limit OpenMP threads to avoid crashes
